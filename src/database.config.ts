@@ -2,10 +2,13 @@ import { join } from 'path';
 import { DataSourceOptions } from 'typeorm';
 
 /**
- * Single source of TypeORM connection options, shared by the Nest runtime
- * (app.module.ts) and the TypeORM CLI datasource (data-source.ts) so migrations
- * and the app never drift apart. Env-driven with sane local defaults that match
- * docker-compose.yml (kata/kata/kata).
+ * Base TypeORM connection options shared by the Nest runtime (app.module.ts) and
+ * the CLI datasource (data-source.ts), so the connection never drifts. Env-driven
+ * with local defaults matching docker-compose.yml (kata/kata/kata).
+ *
+ * NOTE: `migrations` is intentionally NOT here. The running app must not load
+ * migration files (it never executes them, and requiring the .ts source under
+ * compiled Node fails). The CLI datasource adds `migrations` itself.
  */
 export function buildDataSourceOptions(): DataSourceOptions {
   return {
@@ -16,7 +19,6 @@ export function buildDataSourceOptions(): DataSourceOptions {
     password: process.env.DB_PASSWORD ?? 'kata',
     database: process.env.DB_NAME ?? 'kata',
     entities: [join(__dirname, '/**/*.entity.{ts,js}')],
-    migrations: [join(__dirname, '/../db/migrations/*.{ts,js}')],
     synchronize: false, // migrations only — never auto-sync (a habit worth keeping)
     logging: false,
   };
