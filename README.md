@@ -61,7 +61,7 @@ Health check should return all `ok`. You now have 100 seeded `products`.
 ## Daily workflow
 
 ```bash
-git checkout seed                       # the clean baseline (never commit katas here)
+git checkout main                       # the clean baseline (never commit katas here)
 git checkout -b kata-01-idempotency     # one branch per kata
 # → ask the teacher to start the kata (prompt below)
 # → implement in src/ until the assignment passes:

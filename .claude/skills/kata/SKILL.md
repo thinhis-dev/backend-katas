@@ -18,7 +18,7 @@ If omitted, read `LOG.md` and pick the next topic after the last row.
 ## What to do
 
 1. **Locate position.** Read `LOG.md` for the current kata/status. Confirm the
-   branch looks like `kata-<nn>-<slug>` off `seed`; if not, tell the learner the
+   branch looks like `kata-<nn>-<slug>` off `main`; if not, tell the learner the
    branch command before continuing.
 
 2. **Concept brief (Step A).** ≤ 1 screen: what the concept is, *why it matters*,

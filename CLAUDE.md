@@ -123,7 +123,7 @@ review is not done; a nice-looking diff without a green run is not done.
 ## 7. Starting a session
 
 1. Read `LOG.md` → find the last row (current kata + status).
-2. Check the current git branch (`kata-<nn>-<slug>` off `seed`).
+2. Check the current git branch (`kata-<nn>-<slug>` off `main`).
 3. If mid-kata: offer a hint or a review. If a kata is `reviewed`: propose the
    next roadmap topic and run the lesson loop from Step A.
 4. If the learner names a topic out of order, follow them — the roadmap is a
