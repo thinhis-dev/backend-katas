@@ -1,0 +1,57 @@
+# Two ways to use this file:
+#   1. Codespaces / VS Code devcontainer -> the `app` service IS your dev environment;
+#      it reaches the databases by service name (postgres, redis).
+#   2. Running the app on your host (WSL2/local) -> you typically start only the
+#      databases here (`docker compose up -d postgres redis`) and run `npm run start:dev`
+#      on the host, connecting to localhost:5432 / localhost:6379.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: kata
+      POSTGRES_PASSWORD: kata
+      POSTGRES_DB: kata
+    ports:
+      # Override the host port if 5432 is taken: PG_HOST_PORT=5433 docker compose up -d
+      - "${PG_HOST_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kata -d kata"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Dev container for Codespaces / "Reopen in Container". Not needed for host-run mode.
+  app:
+    image: mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm
+    command: sleep infinity
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace:cached
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: kata
+      DB_PASSWORD: kata
+      DB_NAME: kata
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:

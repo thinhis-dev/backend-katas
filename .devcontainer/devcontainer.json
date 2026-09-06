@@ -1,0 +1,13 @@
+{
+  "name": "backend-katas",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "forwardPorts": [3000, 5432, 6379],
+  "postCreateCommand": "cp -n .env.example .env || true && npm install && npm run migration:run && npm run seed",
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "esbenp.prettier-vscode"]
+    }
+  }
+}
