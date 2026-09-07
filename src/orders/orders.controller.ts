@@ -11,6 +11,6 @@ export class OrdersController {
     @Body('quantity') quantity: number,
     @Headers('Idempotency-Key') idempotencyKey: string,
   ) {
-    return this.orders.create(productId, quantity)
+    return this.orders.create(productId, quantity, idempotencyKey)
   }
 }

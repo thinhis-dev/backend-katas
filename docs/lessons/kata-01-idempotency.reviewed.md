@@ -1,7 +1,7 @@
 # Kata 01 — Idempotency
 
 - **Week:** 1
-- **Status:** doing
+- **Status:** reviewed
 - **Branch:** `kata-01-idempotency` (off `main`)
 - **Spec (contract, do not edit):** `test/katas/kata-01-idempotency.e2e-spec.ts`
 - **Run:** `npm run test:kata -- test/katas/kata-01-idempotency.e2e-spec.ts`
