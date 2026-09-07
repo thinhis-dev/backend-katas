@@ -1,5 +1,5 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
-import { ProductsService } from './products.service';
+import { Controller, Get, Param, Query } from '@nestjs/common'
+import { ProductsService } from './products.service'
 
 @Controller('products')
 export class ProductsController {
@@ -7,11 +7,11 @@ export class ProductsController {
 
   @Get()
   findAll(@Query('limit') limit?: string) {
-    return this.products.findAll(limit ? Number(limit) : 20);
+    return this.products.findAll(limit ? Number(limit) : 20)
   }
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.products.findOne(id);
+    return this.products.findOne(id)
   }
 }

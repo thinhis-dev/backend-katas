@@ -23,11 +23,19 @@ import { AppModule } from '../../src/app.module';
  *   Replay same key -> returns the SAME order id (no duplicate row created).
  *   Different key   -> a new, different order id.
  *   Missing key     -> 400 Bad Request.
+ *   Concurrent identical requests (same key, fired via Promise.all) -> ALL
+ *     resolve successfully (200/201) to the SAME order id. No duplicate row,
+ *     no error, no dropped request.
  *
  * The real lesson lives in the replay case: where do you store the key, and how
  * do you avoid a race when two identical requests arrive at once? (Spring
  * parallel: this is the same problem an @Transactional + unique-constraint or a
  * dedicated idempotency store solves in your day job.)
+ *
+ * The concurrent case is the nasty one: a DB UNIQUE constraint stops two rows
+ * from being created, but the LOSER of that race still has to return the
+ * WINNER's result -- and the winner might not be done yet. That's a second,
+ * separate race window beyond "who inserts first." Solve both.
  * ============================================================================
  */
 describe('Kata 01 — Idempotency (e2e)', () => {
@@ -91,4 +99,30 @@ describe('Kata 01 — Idempotency (e2e)', () => {
       .send(orderBody())
       .expect(400);
   });
+
+  it(
+    'resolves concurrent requests with the SAME key to one order, no errors',
+    async () => {
+      const key = randomUUID();
+      const attempts = 5;
+
+      const responses = await Promise.all(
+        Array.from({ length: attempts }, () =>
+          request(app.getHttpServer())
+            .post('/orders')
+            .set('Idempotency-Key', key)
+            .send(orderBody()),
+        ),
+      );
+
+      responses.forEach((res) => {
+        expect([200, 201]).toContain(res.status);
+        expect(res.body.id).toBeDefined();
+      });
+
+      const distinctIds = new Set(responses.map((res) => res.body.id));
+      expect(distinctIds.size).toBe(1);
+    },
+    10000,
+  );
 });

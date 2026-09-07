@@ -5,6 +5,7 @@ import { buildDataSourceOptions } from './database.config';
 import { HealthModule } from './health/health.module';
 import { ProductsModule } from './products/products.module';
 import { RedisModule } from './redis/redis.module';
+import { OrdersModule } from './orders/orders.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { RedisModule } from './redis/redis.module';
     RedisModule,
     HealthModule,
     ProductsModule,
+    OrdersModule
   ],
 })
 export class AppModule {}

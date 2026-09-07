@@ -28,6 +28,14 @@ check-then-insert has a race window. The senior move: let the **database** own
 uniqueness (a `UNIQUE` constraint on the key) so one insert wins and the other
 hits a constraint violation you catch — not an app-level `if`.
 
+That solves race #1 (two rows). It does **not** solve race #2: the *loser* of
+the insert race caught a constraint violation and now has to return the
+*winner's* result — but the winner might still be mid-flight (order not created
+yet). Your idempotency row needs to represent "claimed, not resolved yet" as a
+distinct state from "resolved," and the loser needs a strategy for that window
+(poll/retry, block on the row, or reject with retry-later). This kata's spec
+now requires you to solve both — see the concurrent test below.
+
 ### Spring / JPA parallel
 
 Same defense you'd write at your day job: `@Transactional` around a write guarded
@@ -50,7 +58,17 @@ every line of solution code.
 
 - [ ] `src/orders/order.entity.ts` — the orders table (`id`, `productId`, `quantity`)
 - [ ] **The store you must discover:** where does `key → order` live? Design that
-      entity yourself. *Figuring out what to store is half the lesson.*
+      entity yourself. *Figuring out what to store is half the lesson.* Since you
+      want this reusable beyond orders, a dedicated `idempotency_keys` table
+      (not a column on `orders`) is the right call.
+- [ ] **The claim state:** your row needs to represent "key claimed, result not
+      resolved yet" as distinct from "resolved" — e.g. a nullable `response`
+      column, or an explicit status. This is what the loser of a concurrent
+      insert race reads while it waits.
+- [ ] **The in-flight strategy:** decide what a request does when it loses the
+      insert race but the winner hasn't finished (poll/retry with backoff,
+      block on the row, or reject-and-retry). Pick one and defend the choice in
+      the review.
 - [ ] Migration for the new table(s): `npm run migration:generate -- db/migrations/CreateOrders`
 - [ ] `src/orders/orders.service.ts` — the idempotency logic
 - [ ] `src/orders/orders.controller.ts` — `POST /orders`; read the header with
@@ -65,7 +83,7 @@ missing-key `400` explicitly in the controller — don't lean on a pipe.
 
 ## Acceptance criteria
 
-All 4 spec assertions green. Contract:
+All 5 spec assertions green. Contract:
 
 ```
 POST /orders
@@ -83,12 +101,14 @@ POST /orders
 | 1 | Create with a key             | `201`, body has `id`                  |
 | 2 | Replay the **same** key       | same `id`, no duplicate row           |
 | 3 | Two **different** keys        | two different `id`s                   |
-| 4 | **Missing** key               | `400 Bad Request`                     |
+| 4 | **Missing** key                | `400 Bad Request`                     |
+| 5 | **Concurrent** identical requests (same key, `Promise.all`, 5x) | all `200/201`, all same `id`, no errors |
 
-**Not in the spec, but defend against it anyway:** the concurrent double-submit
-(two identical requests via `Promise.all`). A DB `UNIQUE` constraint makes this
-free. Ask the teacher to harden the spec with a concurrent test once you're green
-if you want to prove your defense holds.
+Case 5 is the real test of your defense: a DB `UNIQUE` constraint alone stops
+duplicate rows, but the request that loses the insert race still has to return
+a valid response — even if the winner hasn't finished yet. If your service
+throws, hangs past the 10s test timeout, or returns mismatched ids under this
+test, that's the in-flight race window described above, not a flaky test.
 
 ---
 
