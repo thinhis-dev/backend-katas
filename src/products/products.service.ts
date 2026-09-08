@@ -33,44 +33,79 @@ export class ProductsService {
     return this.productsRepo.findOne({ where: { id } })
   }
 
-  async purchase(id: string, quantity: number): Promise<PurchaseResult> {
-    let retryCount = 0
+  /** Optimistic locking */
+  // async purchase(id: string, quantity: number): Promise<PurchaseResult> {
+  //   let retryCount = 0
 
-    while (retryCount < this.RETRY_MAX_ATTEMPT) {
-      const product = await this.productsRepo.findOne({ where: { id } })
+  //   while (retryCount < this.RETRY_MAX_ATTEMPT) {
+  //     const product = await this.productsRepo.findOne({ where: { id } })
+
+  //     if (!product) {
+  //       throw new NotFoundException(`Cannot find product with id: ${id}`)
+  //     }
+
+  //     const { stock, version } = product
+
+  //     if (stock < quantity) {
+  //       throw new ConflictException('Quantity is over stock!')
+  //     }
+
+  //     const { affected } = await this.dataSource
+  //       .createQueryBuilder()
+  //       .update(Product)
+  //       .set({
+  //         stock: stock - quantity,
+  //         version: version + 1,
+  //       })
+  //       .where('id = :id AND version = :version', { id, version })
+  //       .execute()
+
+  //     if (affected === 0) {
+  //       retryCount++
+  //       continue
+  //     }
+
+  //     return {
+  //       productId: id,
+  //       quantity,
+  //       remainingStock: stock - quantity,
+  //     }
+  //   }
+
+  //   throw new ConflictException('Too many retry times!')
+  // }
+
+  /** Pessimistic locking */
+  async purchase(id: string, quantity: number): Promise<PurchaseResult> {
+    return this.dataSource.transaction(async (manager) => {
+      const product = await manager
+        .getRepository(Product)
+        .createQueryBuilder('product')
+        .setLock('pessimistic_write')
+        .where('product.id = :id', { id })
+        .getOne()
 
       if (!product) {
         throw new NotFoundException(`Cannot find product with id: ${id}`)
       }
 
-      const { stock, version } = product
+      const { stock } = product
 
       if (stock < quantity) {
         throw new ConflictException('Quantity is over stock!')
       }
 
-      const { affected } = await this.dataSource
-        .createQueryBuilder()
-        .update(Product)
-        .set({
-          stock: stock - quantity,
-          version: version + 1,
-        })
-        .where('id = :id AND version = :version', { id, version })
-        .execute()
+      const remainingStock = stock - quantity
 
-      if (affected === 0) {
-        retryCount++
-        continue
-      }
+      product.stock = remainingStock
+
+      await manager.save(product)
 
       return {
         productId: id,
         quantity,
-        remainingStock: stock - quantity,
+        remainingStock,
       }
-    }
-
-    throw new ConflictException('Too many retry times!')
+    })
   }
 }

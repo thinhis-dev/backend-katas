@@ -1,5 +1,7 @@
 # Kata 02 — Side note: doing it with a pessimistic lock instead
 
+**Status:** reviewed
+
 You solved the oversell race with **optimistic locking** (read `version`,
 `UPDATE … WHERE id AND version`, retry on `affected === 0`). This note is the
 alternative you asked about: the **pessimistic** lock — the one thing TypeORM
