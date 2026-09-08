@@ -1,7 +1,7 @@
 # Kata 02 — Concurrency & locking
 
 - **Week:** 2
-- **Status:** in progress
+- **Status:** reviewed
 - **Branch (when you start):** `kata-02-concurrency-locking`  (off `main`)
 - **Spec:** `test/katas/kata-02-concurrency-locking.e2e-spec.ts` (RED)
 
