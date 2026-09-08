@@ -1,12 +1,17 @@
 import {
-  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common'
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm'
-import { DataSource, Repository, UpdateResult } from 'typeorm'
+import { DataSource, Repository } from 'typeorm'
 import { Product } from './product.entity'
+
+type PurchaseResult = {
+  productId: string
+  quantity: number
+  remainingStock: number
+}
 
 @Injectable()
 export class ProductsService {
@@ -28,11 +33,7 @@ export class ProductsService {
     return this.productsRepo.findOne({ where: { id } })
   }
 
-  async purchase(id: string, quantity: number): Promise<Product | null> {
-    if (!id || quantity <= 0) {
-      throw new BadRequestException('Param is not valid')
-    }
-
+  async purchase(id: string, quantity: number): Promise<PurchaseResult> {
     let retryCount = 0
 
     while (retryCount < this.RETRY_MAX_ATTEMPT) {
@@ -63,7 +64,11 @@ export class ProductsService {
         continue
       }
 
-      return product
+      return {
+        productId: id,
+        quantity,
+        remainingStock: stock - quantity,
+      }
     }
 
     throw new ConflictException('Too many retry times!')

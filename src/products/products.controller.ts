@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { ProductsService } from './products.service'
+import { PurchaseDto } from './dto/product.dto'
 
 @Controller('products')
 export class ProductsController {
@@ -16,7 +17,7 @@ export class ProductsController {
   }
 
   @Post(':id/purchase')
-  async purchase(@Param('id') id: string, @Body('quantity') quantity: number) {
-    return await this.products.purchase(id, quantity)
+  async purchase(@Param('id') id: string, @Body() body: PurchaseDto) {
+    return await this.products.purchase(id, body.quantity)
   }
 }
