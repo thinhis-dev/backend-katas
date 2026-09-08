@@ -43,14 +43,29 @@ import { Product } from '../../src/products/product.entity';
 describe('Kata 02 — Concurrency & locking (e2e)', () => {
   let app: INestApplication;
   let dataSource: DataSource;
+  // Bind to a REAL ephemeral port and address requests by URL. Firing 50
+  // concurrent supertest calls at app.getHttpServer() makes supertest race to
+  // listen() on the same unbound server, which resets connections (ECONNRESET)
+  // and hides the actual result. A bound port is the honest way to test load.
+  let base: string;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
     app = moduleRef.createNestApplication();
-    await app.init();
+    await app.listen(0);
     dataSource = app.get(DataSource);
+    base = (await app.getUrl()).replace('[::1]', '127.0.0.1');
+    // Warm the DB connection pool. A COLD pool serializes the first burst of
+    // concurrent requests (connections open one at a time), which accidentally
+    // hides a lost-update bug — the read-modify-write only races once several
+    // connections are live. Firing a batch of reads up front opens the pool so
+    // every graded burst below races on already-open connections, the way a
+    // server already under load would.
+    await Promise.all(
+      Array.from({ length: 30 }, () => request(base).get('/products')),
+    );
   });
 
   afterAll(async () => {
@@ -75,7 +90,7 @@ describe('Kata 02 — Concurrency & locking (e2e)', () => {
 
   it('decrements stock on a successful purchase', async () => {
     const id = await seedProduct(10);
-    const res = await request(app.getHttpServer())
+    const res = await request(base)
       .post(`/products/${id}/purchase`)
       .send({ quantity: 3 });
     expect([200, 201]).toContain(res.status);
@@ -84,7 +99,7 @@ describe('Kata 02 — Concurrency & locking (e2e)', () => {
 
   it('rejects a purchase that exceeds available stock with 409, leaving stock untouched', async () => {
     const id = await seedProduct(1);
-    await request(app.getHttpServer())
+    await request(base)
       .post(`/products/${id}/purchase`)
       .send({ quantity: 2 })
       .expect(409);
@@ -94,30 +109,36 @@ describe('Kata 02 — Concurrency & locking (e2e)', () => {
   it(
     'sells the LAST unit exactly once under 50 concurrent buys — no oversell',
     async () => {
-      const id = await seedProduct(1);
       const attempts = 50;
+      // Run the last-unit scenario several times on FRESH stock. A single burst
+      // can get lucky (a cold/quiet pool serializes it and a lost-update bug
+      // hides); correct locking holds the invariant on every burst, a race
+      // breaks it on at least one. Every round must be clean.
+      for (let round = 0; round < 4; round++) {
+        const id = await seedProduct(1);
 
-      const responses = await Promise.all(
-        Array.from({ length: attempts }, () =>
-          request(app.getHttpServer())
-            .post(`/products/${id}/purchase`)
-            .send({ quantity: 1 }),
-        ),
-      );
+        const responses = await Promise.all(
+          Array.from({ length: attempts }, () =>
+            request(base)
+              .post(`/products/${id}/purchase`)
+              .send({ quantity: 1 }),
+          ),
+        );
 
-      const ok = responses.filter((r) => r.status === 200 || r.status === 201);
-      const conflict = responses.filter((r) => r.status === 409);
+        const ok = responses.filter((r) => r.status === 200 || r.status === 201);
+        const conflict = responses.filter((r) => r.status === 409);
 
-      // Every response is a clean outcome — no 500s, no dropped requests.
-      expect(ok.length + conflict.length).toBe(attempts);
-      // Exactly one buyer got the last unit.
-      expect(ok.length).toBe(1);
-      // The other 49 were told there was nothing left.
-      expect(conflict.length).toBe(attempts - 1);
-      // The invariant that matters: stock landed on 0 and never went negative.
-      expect(await stockOf(id)).toBe(0);
+        // Every response is a clean outcome — no 500s, no dropped requests.
+        expect(ok.length + conflict.length).toBe(attempts);
+        // Exactly one buyer got the last unit.
+        expect(ok.length).toBe(1);
+        // The other 49 were told there was nothing left.
+        expect(conflict.length).toBe(attempts - 1);
+        // The invariant that matters: stock landed on 0 and never went negative.
+        expect(await stockOf(id)).toBe(0);
+      }
     },
-    20000,
+    30000,
   );
 
   it(
@@ -128,7 +149,7 @@ describe('Kata 02 — Concurrency & locking (e2e)', () => {
 
       const responses = await Promise.all(
         Array.from({ length: attempts }, () =>
-          request(app.getHttpServer())
+          request(base)
             .post(`/products/${id}/purchase`)
             .send({ quantity: 1 }),
         ),
