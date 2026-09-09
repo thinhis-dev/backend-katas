@@ -1,7 +1,7 @@
 # Kata 03 — Transactions & consistency
 
 - **Week:** 3
-- **Status:** todo
+- **Status:** reviewed
 - **Branch:** `kata-03-transactions`  (off `main`) — `git checkout -b kata-03-transactions`
 - **Spec:** `test/katas/kata-03-transactions.e2e-spec.ts`  *(do NOT edit — it is the contract)*
 - **Run:** `npm run test:kata -- test/katas/kata-03-transactions.e2e-spec.ts`
