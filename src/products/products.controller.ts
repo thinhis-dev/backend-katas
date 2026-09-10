@@ -11,6 +11,11 @@ export class ProductsController {
     return this.products.findAll(limit ? Number(limit) : 20)
   }
 
+  @Get(':id/db-reads')
+  getNumberOfDbRead(@Param('id') id: string) {
+    return this.products.getNumberOfDbRead(id)
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.products.findOne(id)

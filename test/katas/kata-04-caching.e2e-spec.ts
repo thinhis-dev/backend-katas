@@ -67,7 +67,12 @@ describe('Kata 04 — Caching (e2e)', () => {
       imports: [AppModule],
     }).compile();
     app = moduleRef.createNestApplication();
-    await app.init();
+    // Must actually LISTEN (not just init): the stampede test fires 20
+    // concurrent supertest calls at app.getHttpServer(). Against an unbound
+    // server they race to listen() on the same socket → read ECONNRESET.
+    // Binding once here makes supertest reuse the live address. (Same fix as
+    // kata-02.)
+    await app.listen(0);
     redis = app.get<Redis>(REDIS);
   });
 
