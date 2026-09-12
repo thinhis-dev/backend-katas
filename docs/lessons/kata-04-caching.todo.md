@@ -223,3 +223,57 @@ The whole hand-rolled dance — `SET NX PX` + token + Lua release + TTL — is w
 **Redisson `RLock`** (`lock.lock()` / `lock.unlock()`) does for you, and what
 `@Cacheable(sync = true)` hides entirely. Building it once is how you learn what
 those annotations buy under load.
+
+---
+
+## Redis — review notes & parking lot (ask me later)
+
+_Kata green (4/4) + reviewed 2026-09-12. The lock primitive is correct; the notes
+below are the "not just pass the tests" layer — each is a real gap, not a nit._
+
+### What's solid (keep doing this)
+
+- `SET NX PX` + unique token + Lua compare-and-delete release = the canonical
+  distributed lock. Correct and safe.
+- Chose a **Redis** lock over an in-process `Map` → single-flight still holds
+  across multiple pods (a `Map` wouldn't be shared).
+- Invalidation is **awaited** and happens **after** the transaction commits.
+
+### Open questions to raise later (anchors for a future session)
+
+1. **Lock TTL vs. load time.** TTL is 200ms. If a DB read exceeds it, the lock
+   expires mid-load and a second caller becomes a second loader → `dbReads > 1`.
+   → *Ask: lock extension / watchdog (Redisson lease renewal); how to pick a TTL.*
+2. **Loser timeout returns 404.** `waitForCache` exhausting throws `NotFound` for
+   a product that EXISTS. → *Ask: why this must be a 503 + `Retry-After`, not a
+   404 (ties to Week 6 rate limiting).*
+3. **No TTL on the cached value.** `SET id json` never expires; explicit
+   invalidation is the only eviction, so any out-of-band write = permanent stale.
+   → *Ask: TTL as a backstop; the delete-then-repopulate-stale race and its fixes
+   (TTL, delayed double-delete, write-through).*
+4. **Key namespacing.** Value under raw `id`, lock under `lock:id`. → *Ask: a
+   `product:<id>` scheme and why bare-UUID collisions bite in a shared Redis DB.*
+5. **Cache ↔ DB are two systems (no 2-phase commit).** There's always a window
+   where one is updated and the other isn't. → *Ask: when invalidation needs the
+   **outbox** (kata-03) vs. when a TTL is good enough; commit-then-invalidate
+   ordering and `@TransactionalEventListener(AFTER_COMMIT)`.*
+6. **`countDbRead` Map grows unbounded.** Diagnostic-only here. → *Ask: the prod
+   shape (a metrics counter / Prometheus, not a per-id in-memory Map).*
+7. **Invalidation-failure policy.** If `redis.del` throws after a committed
+   purchase, the client sees 500 on a successful write. → *Ask: log-and-continue
+   vs. fail; how the TTL backstops a missed `del`.*
+
+### Redis command cheat-sheet (for reference)
+
+| Command | Meaning |
+|---|---|
+| `SET k v EX <s>` / `PX <ms>` | set with a TTL (seconds / milliseconds) |
+| `SET k v NX` | set only if absent — the atomic claim behind locks & idempotency keys |
+| `GET k` / `DEL k` | read / evict |
+| `EVAL <lua> <numkeys> k … arg …` | run a multi-step op atomically (our token-checked release) |
+| `TTL k` / `PTTL k` | inspect remaining TTL (s / ms) |
+| `EXPIRE k <s>` | add/replace a TTL on an existing key |
+
+**Spring parallels:** the lock dance ≈ Redisson `RLock`; cache-aside ≈
+`@Cacheable` + `@CacheEvict`; single-flight ≈ `@Cacheable(sync = true)`;
+commit-then-invalidate ≈ `@TransactionalEventListener(phase = AFTER_COMMIT)`.
