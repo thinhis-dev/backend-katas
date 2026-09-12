@@ -1,7 +1,7 @@
 # Kata 04 — Caching
 
 - **Week:** 4
-- **Status:** todo
+- **Status:** reviewed (green 4/4 + senior review, 2026-09-12)
 - **Branch:** `kata-04-caching`  (off `main`)
 - **Spec:** `test/katas/kata-04-caching.e2e-spec.ts`  (the contract — do NOT edit)
 - **Run:** `npm run test:kata -- test/katas/kata-04-caching.e2e-spec.ts`

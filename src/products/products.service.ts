@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common'
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm'
 import { DataSource, Repository } from 'typeorm'
@@ -46,6 +47,7 @@ export class ProductsService {
 
   private RETRY_MAX_ATTEMPT = 10
 
+  // TODO: this timeout is too tight => raise or redisson-watchdog pattern will be better
   private POLL_MS = 20
 
   private convertProductFromCached = (productFromCache: string): Product => {
@@ -71,6 +73,8 @@ export class ProductsService {
 
   private countDbRead = new Map()
 
+  private cacheKey = (id: string) => `product:${id}`
+
   private async acquireLock(id, token, ttlMs) {
     return await this.redis.set(`lock:${id}`, token, 'PX', ttlMs, 'NX')
   }
@@ -90,9 +94,7 @@ export class ProductsService {
 
   private async waitForCache(id) {
     for (let i = 0; i < this.RETRY_MAX_ATTEMPT; i++) {
-      await this.sleep(this.POLL_MS)
-
-      const cachedProduct = await this.redis.get(id)
+      const cachedProduct = await this.redis.get(this.cacheKey(id))
 
       if (cachedProduct) {
         return {
@@ -100,6 +102,8 @@ export class ProductsService {
           source: SOURCE.CACHE,
         }
       }
+
+      await this.sleep(this.POLL_MS)
     }
   }
 
@@ -108,7 +112,7 @@ export class ProductsService {
   }
 
   async findOne(id: string): Promise<ProductWithSource | null> {
-    const cachedProduct = await this.redis.get(id)
+    const cachedProduct = await this.redis.get(this.cacheKey(id))
 
     if (cachedProduct) {
       return {
@@ -128,7 +132,7 @@ export class ProductsService {
           throw new NotFoundException('Cannot find that product')
         }
 
-        await this.redis.set(id, JSON.stringify(product))
+        await this.redis.set(this.cacheKey(id), JSON.stringify(product), 'EX', 60)
 
         return {
           ...product,
@@ -141,7 +145,7 @@ export class ProductsService {
       const productAfterWaiting = await this.waitForCache(id)
 
       if (!productAfterWaiting) {
-        throw new NotFoundException('Cannot find product')
+        throw new ServiceUnavailableException('Cannot find product')
       }
 
       return productAfterWaiting
@@ -229,7 +233,7 @@ export class ProductsService {
       },
     )
 
-    await this.redis.del(id)
+    await this.redis.del(this.cacheKey(id))
     this.countDbRead.set(id, 0)
 
     return purchaseResult
