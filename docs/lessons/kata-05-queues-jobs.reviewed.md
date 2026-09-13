@@ -1,7 +1,7 @@
 # Kata 05 — Queues & jobs
 
 - **Week:** 5
-- **Status:** in progress
+- **Status:** reviewed
 - **Branch:** `kata-05-queues-jobs`  (off `main`)
 - **Spec:** `test/katas/kata-05-queues-jobs.e2e-spec.ts`  *(the contract — do NOT edit)*
 
@@ -148,6 +148,13 @@ Run: `npm run test:kata -- test/katas/kata-05-queues-jobs.e2e-spec.ts`
 - How does the worker actually pull jobs — polling vs. blocking (`BRPOPLPUSH`)?
 - What's the difference between BullMQ's own `attemptsMade` and our `runs`?
 - BullMQ has no native DLQ — why do we forward failures to our own list?
+  → **Resolved in review:** don't. BullMQ routes a still-retriable throw to
+  `delayed` and only an *exhausted* one to the `failed` set, so `queue.getFailed()`
+  *is* the DLQ — crash-durable, and it already applies the `attemptsMade >= attempts`
+  guard for you. The `worker.on('failed')` + `RPUSH` copy was a best-effort shadow
+  of state the queue already owns (lost if the process dies in the gap); deleted it.
+  `lockDuration`/stalled-job detection is a *different* failure (worker dies while a
+  job is `active`), not this one.
 - Concurrency: what does `Worker`'s `concurrency` option change, and locking?
 - `UnrecoverableError` (v6): how to make a job fail *without* burning its retries
   — the "this will never work, don't bother retrying" signal.
