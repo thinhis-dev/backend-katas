@@ -43,6 +43,55 @@ Docs: https://docs.bullmq.io/guide/jobs · https://docs.bullmq.io/guide/retrying
 
 ---
 
+## When you actually need a queue (and when it's overengineering)
+
+A queue is not free: it's a second piece of infra to run, monitor, and reason
+about (Redis + a worker process), plus a whole class of new problems —
+at-least-once delivery, idempotent handlers, ordering, poison messages, backlog.
+Reach for it only when the work has one of these **real** properties:
+
+- **Slow work the caller shouldn't wait on.** Sending an email/SMS, generating a
+  PDF or report, transcoding an image/video, calling a slow third-party API.
+  *Real problem:* checkout takes 4s because you `await` the confirmation email
+  through a flaky SMTP server, and when SMTP is down the whole order 500s. Move
+  the email to a queue → checkout returns in 200ms and the email retries itself.
+- **Work that must survive a crash / must not be lost.** Anything with money,
+  fulfillment, or "we promised the user we'd do this." *Real problem:* a fire-
+  and-forget `@Async` task to charge a card runs in a thread pool; the pod is
+  redeployed mid-flight → the charge is silently gone with no record. A queued
+  job is a durable row in Redis that re-runs.
+- **Spiky load you want to smooth.** 10k webhooks arrive in a burst but your DB
+  can only take 500/s. The queue is a *buffer* — workers drain it at a safe rate
+  instead of the burst knocking the DB over.
+- **Fan-out / retryable integration.** One order event needs to hit search-index
+  + analytics + a partner API, each of which fails independently and should retry
+  on its own without re-charging the card.
+- **Scheduled / recurring work.** Nightly reconciliation, "cancel unpaid orders
+  after 30 min." (In BullMQ v6 this is *Job Schedulers*, not the old `repeat`.)
+
+### You probably DON'T need a queue when…
+
+- The work is **fast and in-process** (a few ms of CPU, one local DB write) — just
+  do it inline. A queue adds latency and a failure mode to save nothing.
+- The caller **needs the result now** to respond (it's request/response, not
+  fire-and-forget). Queuing then blocking-polling for the result reinvents a slow
+  synchronous call.
+- **A DB transaction already gives you the guarantee.** If "both rows change or
+  neither" is the need, that's kata-03's transaction, not a job.
+- You reach for it **"for scale" with no measured problem.** One box, low traffic,
+  work that finishes in 50ms → inline is correct. Add the queue when a real
+  number hurts (p99 latency, a lost-task incident, a DB overload), not before.
+
+**The one-line test:** *"If this work fails or is slow, does the user's request
+need to fail or wait?"* No → queue it. Yes → keep it inline (and make it fast).
+
+*Spring parallel:* same call you make when deciding between doing work in the
+request thread, handing it to `@Async`, or putting it on a real broker
+(Rabbit/Kafka/SQS). The annotation makes `@Async` look free — it isn't; it just
+hides the same trade-off this section makes explicit.
+
+---
+
 ## Acceptance criteria (what the spec asserts)
 
 1. **Offload** — `POST /jobs {workMs:800}` returns `202 {jobId}` in <500ms, and

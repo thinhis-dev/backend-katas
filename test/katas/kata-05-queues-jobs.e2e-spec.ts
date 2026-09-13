@@ -1,7 +1,7 @@
-import { INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
-import request from 'supertest';
-import { AppModule } from '../../src/app.module';
+import { INestApplication } from '@nestjs/common'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { AppModule } from '../../src/app.module'
 
 /**
  * ============================================================================
@@ -73,22 +73,22 @@ import { AppModule } from '../../src/app.module';
  * ============================================================================
  */
 describe('Kata 05 — Queues & jobs (e2e)', () => {
-  let app: INestApplication;
+  let app: INestApplication
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
-    app = moduleRef.createNestApplication();
-    await app.init();
-  });
+    }).compile()
+    app = moduleRef.createNestApplication()
+    await app.init()
+  })
 
   afterAll(async () => {
     // Your JobsModule MUST close its Worker and Queue on shutdown, or Jest hangs
     // on open Redis handles. (Spring parallel: the container calling
     // ExecutorService.shutdown() for you.)
-    await app?.close();
-  });
+    await app?.close()
+  })
 
   /** Poll GET /jobs/:jobId until `state` is terminal, or time out. */
   const waitForState = async (
@@ -96,91 +96,81 @@ describe('Kata 05 — Queues & jobs (e2e)', () => {
     terminal: string[],
     timeoutMs = 15000,
   ): Promise<{ state: string; runs: number }> => {
-    const deadline = Date.now() + timeoutMs;
-    let last = { state: 'unknown', runs: 0 };
+    const deadline = Date.now() + timeoutMs
+    let last = { state: 'unknown', runs: 0 }
     while (Date.now() < deadline) {
-      const res = await request(app.getHttpServer()).get(`/jobs/${jobId}`);
+      const res = await request(app.getHttpServer()).get(`/jobs/${jobId}`)
       if (res.status === 200) {
-        last = { state: res.body.state, runs: res.body.runs };
-        if (terminal.includes(last.state)) return last;
+        last = { state: res.body.state, runs: res.body.runs }
+        if (terminal.includes(last.state)) return last
       }
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 100))
     }
-    return last;
-  };
+    return last
+  }
 
-  it(
-    'OFFLOADS the work: POST returns 202 immediately, the worker finishes it later',
-    async () => {
-      // The processor "works" for 800ms. If the HTTP handler did the work inline
-      // instead of enqueuing, this POST could not come back in a fraction of that.
-      const t0 = Date.now();
-      const enqueued = await request(app.getHttpServer())
-        .post('/jobs')
-        .send({ workMs: 800 })
-        .expect(202);
-      const elapsed = Date.now() - t0;
+  it('OFFLOADS the work: POST returns 202 immediately, the worker finishes it later', async () => {
+    // The processor "works" for 800ms. If the HTTP handler did the work inline
+    // instead of enqueuing, this POST could not come back in a fraction of that.
+    const t0 = Date.now()
+    const enqueued = await request(app.getHttpServer())
+      .post('/jobs')
+      .send({ workMs: 800 })
+      .expect(202)
+    const elapsed = Date.now() - t0
 
-      const jobId = enqueued.body.jobId;
-      expect(typeof jobId).toBe('string');
-      expect(jobId.length).toBeGreaterThan(0);
-      // enqueue-and-return, not run-inline
-      expect(elapsed).toBeLessThan(500);
+    const jobId = enqueued.body.jobId
+    expect(typeof jobId).toBe('string')
+    expect(jobId.length).toBeGreaterThan(0)
+    // enqueue-and-return, not run-inline
+    expect(elapsed).toBeLessThan(500)
 
-      // at return time the slow job cannot possibly be done yet
-      const immediate = await request(app.getHttpServer())
-        .get(`/jobs/${jobId}`)
-        .expect(200);
-      expect(immediate.body.state).not.toBe('completed');
+    // at return time the slow job cannot possibly be done yet
+    const immediate = await request(app.getHttpServer())
+      .get(`/jobs/${jobId}`)
+      .expect(200)
 
-      // ...but the worker does pick it up and complete it
-      const final = await waitForState(jobId, ['completed', 'failed']);
-      expect(final.state).toBe('completed');
-      expect(final.runs).toBe(1);
-    },
-    20000,
-  );
+    expect(immediate.body.state).not.toBe('completed')
 
-  it(
-    'RETRIES a transient failure with backoff, then succeeds',
-    async () => {
-      // fails its first 2 runs, succeeds on the 3rd — within the attempts budget
-      const enqueued = await request(app.getHttpServer())
-        .post('/jobs')
-        .send({ failTimes: 2 })
-        .expect(202);
-      const jobId = enqueued.body.jobId;
+    // ...but the worker does pick it up and complete it
+    const final = await waitForState(jobId, ['completed', 'failed'])
+    expect(final.state).toBe('completed')
+    expect(final.runs).toBe(1)
+  }, 20000)
 
-      const final = await waitForState(jobId, ['completed', 'failed']);
-      expect(final.state).toBe('completed');
-      // it did not give up on the first throw: the processor body ran 3 times
-      expect(final.runs).toBe(3);
-    },
-    20000,
-  );
+  it('RETRIES a transient failure with backoff, then succeeds', async () => {
+    // fails its first 2 runs, succeeds on the 3rd — within the attempts budget
+    const enqueued = await request(app.getHttpServer())
+      .post('/jobs')
+      .send({ failTimes: 2 })
+      .expect(202)
+    const jobId = enqueued.body.jobId
 
-  it(
-    'DEAD-LETTERS a job that exhausts its retries — it is NOT silently lost',
-    async () => {
-      // fails more times than the attempts budget allows, so it can never succeed
-      const enqueued = await request(app.getHttpServer())
-        .post('/jobs')
-        .send({ failTimes: 99 })
-        .expect(202);
-      const jobId = enqueued.body.jobId;
+    const final = await waitForState(jobId, ['completed', 'failed'])
+    expect(final.state).toBe('completed')
+    // it did not give up on the first throw: the processor body ran 3 times
+    expect(final.runs).toBe(3)
+  }, 20000)
 
-      const final = await waitForState(jobId, ['completed', 'failed']);
-      expect(final.state).toBe('failed');
-      // it burned exactly its whole attempts budget before being parked (3 runs)
-      expect(final.runs).toBe(3);
+  it('DEAD-LETTERS a job that exhausts its retries — it is NOT silently lost', async () => {
+    // fails more times than the attempts budget allows, so it can never succeed
+    const enqueued = await request(app.getHttpServer())
+      .post('/jobs')
+      .send({ failTimes: 99 })
+      .expect(202)
+    const jobId = enqueued.body.jobId
 
-      // and it landed in the dead-letter list rather than disappearing
-      const dlq = await request(app.getHttpServer())
-        .get('/jobs/dead-letter')
-        .expect(200);
-      expect(Array.isArray(dlq.body.jobIds)).toBe(true);
-      expect(dlq.body.jobIds).toContain(jobId);
-    },
-    20000,
-  );
-});
+    const final = await waitForState(jobId, ['completed', 'failed'])
+    expect(final.state).toBe('failed')
+    // it burned exactly its whole attempts budget before being parked (3 runs)
+    expect(final.runs).toBe(3)
+
+    // and it landed in the dead-letter list rather than disappearing
+    const dlq = await request(app.getHttpServer())
+      .get('/jobs/dead-letter')
+      .expect(200)
+
+    expect(Array.isArray(dlq.body.jobIds)).toBe(true)
+    expect(dlq.body.jobIds).toContain(jobId)
+  }, 20000)
+})

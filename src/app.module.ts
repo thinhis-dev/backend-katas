@@ -8,6 +8,7 @@ import { RedisModule } from './redis/redis.module'
 import { OrdersModule } from './orders/orders.module'
 import { APP_PIPE } from '@nestjs/core'
 import { AccountsModule } from './accounts/accounts.module'
+import { JobsModule } from './jobs/jobs.module'
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AccountsModule } from './accounts/accounts.module'
     ProductsModule,
     OrdersModule,
     AccountsModule,
+    JobsModule
   ],
   providers: [
     {
