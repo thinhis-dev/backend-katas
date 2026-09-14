@@ -1,7 +1,7 @@
 # Kata 06 — Rate limiting
 
 - **Week:** 6
-- **Status:** doing (assignment handed off 2026-09-13; spec is RED 0/4)
+- **Status:** reviewed (2026-09-14; spec GREEN 4/4, stress-verified 8× on the concurrency case)
 - **Branch:** `kata-06-rate-limiting`  (off `main`)
 - **Spec:** `test/katas/kata-06-rate-limiting.e2e-spec.ts`  (the contract — do NOT edit)
 - **Run:** `npm run test:kata -- test/katas/kata-06-rate-limiting.e2e-spec.ts`

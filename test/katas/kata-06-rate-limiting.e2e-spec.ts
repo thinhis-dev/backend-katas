@@ -1,10 +1,10 @@
-import { INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
-import request from 'supertest';
-import { randomUUID } from 'node:crypto';
-import Redis from 'ioredis';
-import { AppModule } from '../../src/app.module';
-import { REDIS } from '../../src/redis/redis.module';
+import { INestApplication } from '@nestjs/common'
+import { Test } from '@nestjs/testing'
+import request from 'supertest'
+import { randomUUID } from 'node:crypto'
+import Redis from 'ioredis'
+import { AppModule } from '../../src/app.module'
+import { REDIS } from '../../src/redis/redis.module'
 
 /**
  * ============================================================================
@@ -60,91 +60,88 @@ import { REDIS } from '../../src/redis/redis.module';
  * ============================================================================
  */
 describe('Kata 06 — Rate limiting (e2e)', () => {
-  let app: INestApplication;
-  let redis: Redis;
+  let app: INestApplication
+  let redis: Redis
 
-  const LIMIT = 100;
-  const WINDOW_SECONDS = 60;
+  const LIMIT = 100
+  const WINDOW_SECONDS = 60
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
-    app = moduleRef.createNestApplication();
+    }).compile()
+    app = moduleRef.createNestApplication()
     // Must actually LISTEN (not just init): the concurrency test fires a burst
     // of supertest calls at app.getHttpServer(). Against an unbound server they
     // race to listen() on the same socket -> ECONNRESET. Binding once here makes
     // supertest reuse the live address. (Same fix as kata-02 / kata-04.)
-    await app.listen(0);
-    redis = app.get<Redis>(REDIS);
-  });
+    await app.listen(0)
+    redis = app.get<Redis>(REDIS)
+  })
 
   afterAll(async () => {
-    await app?.close();
-  });
+    await app?.close()
+  })
 
   /** A brand-new user id => a fresh, full bucket, isolated from other tests. */
-  const freshUser = (): string => `u-${randomUUID()}`;
+  const freshUser = (): string => `u-${randomUUID()}`
 
   const hit = (userId: string) =>
-    request(app.getHttpServer()).get('/limited').set('X-User-Id', userId);
+    request(app.getHttpServer()).get('/limited').set('X-User-Id', userId)
 
   it('allows a request while the user still has budget', async () => {
-    const res = await hit(freshUser()).expect(200);
-    expect(res.body.ok).toBe(true);
-  });
+    const res = await hit(freshUser()).expect(200)
+    expect(res.body.ok).toBe(true)
+  })
 
   it('allows exactly LIMIT requests, then answers 429 with a valid Retry-After', async () => {
-    const user = freshUser();
+    const user = freshUser()
 
     // Spend the whole budget — every one of the first LIMIT requests is allowed.
     for (let i = 0; i < LIMIT; i++) {
-      await hit(user).expect(200);
+      await hit(user).expect(200)
     }
 
     // The next request is over the limit.
-    const blocked = await hit(user).expect(429);
+    const blocked = await hit(user).expect(429)
 
     // Retry-After must be an integer number of seconds in (0, WINDOW].
-    const retryAfter = Number(blocked.headers['retry-after']);
-    expect(Number.isInteger(retryAfter)).toBe(true);
-    expect(retryAfter).toBeGreaterThan(0);
-    expect(retryAfter).toBeLessThanOrEqual(WINDOW_SECONDS);
-  });
+    const retryAfter = Number(blocked.headers['retry-after'])
+
+    expect(Number.isInteger(retryAfter)).toBe(true)
+    expect(retryAfter).toBeGreaterThan(0)
+    expect(retryAfter).toBeLessThanOrEqual(WINDOW_SECONDS)
+  })
 
   it('is per-user: one user hitting the limit does not throttle another', async () => {
-    const noisy = freshUser();
-    const quiet = freshUser();
+    const noisy = freshUser()
+    const quiet = freshUser()
 
     // Exhaust the noisy user.
     for (let i = 0; i < LIMIT; i++) {
-      await hit(noisy).expect(200);
+      await hit(noisy).expect(200)
     }
-    await hit(noisy).expect(429);
+    await hit(noisy).expect(429)
 
     // The quiet user still has a full, independent bucket.
-    const res = await hit(quiet).expect(200);
-    expect(res.body.ok).toBe(true);
-  });
+    const res = await hit(quiet).expect(200)
+    expect(res.body.ok).toBe(true)
+  })
 
-  it(
-    'does NOT over-admit under a concurrent burst: exactly LIMIT succeed, the rest are 429',
-    async () => {
-      const user = freshUser();
-      const overshoot = 25;
+  it('does NOT over-admit under a concurrent burst: exactly LIMIT succeed, the rest are 429', async () => {
+    const user = freshUser()
+    const overshoot = 25
 
-      const responses = await Promise.all(
-        Array.from({ length: LIMIT + overshoot }, () => hit(user)),
-      );
+    const responses = await Promise.all(
+      Array.from({ length: LIMIT + overshoot }, () => hit(user)),
+    )
 
-      const allowed = responses.filter((r) => r.status === 200).length;
-      const throttled = responses.filter((r) => r.status === 429).length;
+    const allowed = responses.filter((r) => r.status === 200).length
+    const throttled = responses.filter((r) => r.status === 429).length
 
-      // Atomic check-and-decrement: never more than LIMIT get through, and no
-      // request is lost to a third status code.
-      expect(allowed).toBe(LIMIT);
-      expect(throttled).toBe(overshoot);
-    },
-    20000,
-  );
-});
+    // Atomic check-and-decrement: never more than LIMIT get through, and no
+    // request is lost to a third status code.
+    expect(allowed).toBe(LIMIT)
+    expect(throttled).toBe(overshoot)
+  }, 20000)
+})
