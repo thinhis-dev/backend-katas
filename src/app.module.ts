@@ -11,6 +11,7 @@ import { AccountsModule } from './accounts/accounts.module'
 import { JobsModule } from './jobs/jobs.module'
 import { LimitedModule } from './limited/limited.module'
 import { EventModule } from './events/event.module'
+import { ObserveModule } from './observe/observe.module'
 
 @Module({
   imports: [
@@ -23,7 +24,8 @@ import { EventModule } from './events/event.module'
     AccountsModule,
     JobsModule,
     LimitedModule,
-    EventModule
+    EventModule,
+    ObserveModule,
   ],
   providers: [
     {
