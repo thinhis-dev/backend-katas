@@ -176,8 +176,6 @@ describe('Kata 07 — Query performance (e2e)', () => {
       cursor: p1.nextCursor as string,
     })
 
-    console.log({ p1, p2 })
-
     expect(p2.items).toHaveLength(PAGE)
     // disjoint: page 2 must not repeat any row from page 1
     const p1ids = new Set(idsOf(p1.items))

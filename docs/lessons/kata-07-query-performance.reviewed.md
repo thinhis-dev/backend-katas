@@ -1,7 +1,7 @@
 # Kata 07 — Query performance
 
 - **Week:** 7
-- **Status:** doing
+- **Status:** reviewed
 - **Branch (when you start):** `kata-07-query-performance`  (off `main`)
 - **Spec:** `test/katas/kata-07-query-performance.e2e-spec.ts`  *(the contract — do NOT edit)*
 
@@ -128,3 +128,37 @@ Run: `npm run test:kata -- test/katas/kata-07-query-performance.e2e-spec.ts`
   don't fetch it per row in a loop — one `IN (...)` / join. Optional extension.
 - Index write cost: every index you add slows every INSERT/UPDATE. When is a
   composite index *not* worth it?
+
+---
+
+## Review outcome (2026-09-15) — reviewed, green
+
+**Landed the whole lesson.** `CREATE INDEX idx_event_feed ON events (user_id,
+created_at DESC, id DESC)` — equality column leads, then the two `ORDER BY` keys
+in order with matching directions ⇒ `EXPLAIN` shows Index Scan, no Seq Scan, no
+Sort. The service's three column lists finally agree (ORDER BY = keyset predicate
+= cursor payload = `(created_at, id)`), and `nextCursor` is `null` at the end.
+
+**The journey (what broke, in order):** (1) first keyset compared only
+`created_at` — no tiebreaker; (2) then compared `(created_at, userId)` — `userId`
+is the *filter*, constant across a feed, so it can never break a tie; the correct
+tiebreaker is the unique `id`; (3) cursor encode/decode key-name mismatch left
+the second tuple element `undefined` — masked because the graded spec seeds
+unique 1-second-apart timestamps. Caught (1)–(3) with a supplemental diagnostic
+that seeds **equal** timestamps: `test/katas/kata-07-tiebreaker.e2e-spec.ts`
+(safe to delete).
+
+**Reviewer notes for next time (none blocked):** `down()` should be `DROP INDEX
+IF EXISTS`; unguarded `JSON.parse(cursor)` → 500 on a bad token (should be 400);
+`limit` unbounded in the controller (`Number('abc')`→NaN, and a DoS lever — clamp
+1..100). Optional: `INCLUDE (kind)` for an Index Only Scan.
+
+**Parking-lot answers that came up:**
+- *Row-value `(a,b) < (x,y)` vs the OR form* — same result set, but the row-value
+  form is a single index range scan that maps straight onto the composite index;
+  the `created_at < t OR (created_at = t AND id < id)` form can confuse the
+  planner into not using the index as one range.
+- *Backward Index Scan* — a plain ASC `(user_id, created_at, id)` would also kill
+  the Sort (Postgres reads the index backward for `DESC`). Declaring the index
+  `DESC` is the explicit, self-documenting form and the habit that pays off the
+  day the sort directions are mixed (where a backward scan can't serve both).
