@@ -10,6 +10,7 @@ import { APP_PIPE } from '@nestjs/core'
 import { AccountsModule } from './accounts/accounts.module'
 import { JobsModule } from './jobs/jobs.module'
 import { LimitedModule } from './limited/limited.module'
+import { EventModule } from './events/event.module'
 
 @Module({
   imports: [
@@ -21,7 +22,8 @@ import { LimitedModule } from './limited/limited.module'
     OrdersModule,
     AccountsModule,
     JobsModule,
-    LimitedModule
+    LimitedModule,
+    EventModule
   ],
   providers: [
     {

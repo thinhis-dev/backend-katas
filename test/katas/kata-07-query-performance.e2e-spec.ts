@@ -1,8 +1,8 @@
-import { INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
-import { DataSource } from 'typeorm';
-import request from 'supertest';
-import { AppModule } from '../../src/app.module';
+import { INestApplication } from '@nestjs/common'
+import { Test } from '@nestjs/testing'
+import { DataSource } from 'typeorm'
+import request from 'supertest'
+import { AppModule } from '../../src/app.module'
 
 /**
  * ============================================================================
@@ -75,38 +75,43 @@ import { AppModule } from '../../src/app.module';
 
 // The user whose feed we grade. Seeded deterministically below; kept out of the
 // noise user-id range so the planner sees a selective, index-friendly filter.
-const FEED_USER = 900001;
-const TARGET_ROWS = 2000; // this user's events
-const NOISE_ROWS = 60000; // other users' events, so the table is big & the filter selective
-const PAGE = 50;
+const FEED_USER = 900001
+const TARGET_ROWS = 2000 // this user's events
+const NOISE_ROWS = 60000 // other users' events, so the table is big & the filter selective
+const PAGE = 50
 
-type FeedItem = { id: string | number; userId: number; createdAt: string; kind: string };
+type FeedItem = {
+  id: string | number
+  userId: number
+  createdAt: string
+  kind: string
+}
 
 describe('Kata 07 — Query performance (e2e)', () => {
-  let app: INestApplication;
-  let dataSource: DataSource;
+  let app: INestApplication
+  let dataSource: DataSource
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
-    app = moduleRef.createNestApplication();
-    await app.init();
-    dataSource = app.get(DataSource);
+    }).compile()
+    app = moduleRef.createNestApplication()
+    await app.init()
+    dataSource = app.get(DataSource)
 
     // --- Test-side seeding only (NOT the src/ you write). ---------------------
     // If this throws `relation "events" does not exist`, run your CreateEvents
     // migration first (on Codespace). Bulk-insert via generate_series so even
     // 60k rows is one fast round trip, then ANALYZE so the planner has real
     // stats to choose the index (without stats it guesses and EXPLAIN is a lie).
-    await dataSource.query('TRUNCATE TABLE events RESTART IDENTITY');
+    await dataSource.query('TRUNCATE TABLE events RESTART IDENTITY')
     // Noise: many users, so FEED_USER is a small, selective slice of a big table.
     await dataSource.query(
       `INSERT INTO events (user_id, created_at, kind)
        SELECT (g % 2000) + 1, now() - (g || ' seconds')::interval, 'noise'
        FROM generate_series(1, $1) g`,
       [NOISE_ROWS],
-    );
+    )
     // Target user: created_at strictly increasing with g, so g is exactly the
     // newest-first rank (g=TARGET_ROWS is the freshest). Inserted after the
     // noise, so ids ascend with g too — (created_at, id) agree, ordering is total.
@@ -115,67 +120,81 @@ describe('Kata 07 — Query performance (e2e)', () => {
        SELECT $1, timestamptz '2020-01-01 00:00:00+00' + (g || ' seconds')::interval, 'target'
        FROM generate_series(1, $2) g`,
       [FEED_USER, TARGET_ROWS],
-    );
-    await dataSource.query('ANALYZE events');
-  }, 60000);
+    )
+    await dataSource.query('ANALYZE events')
+  }, 60000)
 
   afterAll(async () => {
-    await app?.close();
-  });
+    await app?.close()
+  })
 
   const getFeed = async (
     query: Record<string, string | number>,
   ): Promise<{ items: FeedItem[]; nextCursor: string | null }> => {
-    const res = await request(app.getHttpServer()).get('/events').query(query).expect(200);
-    return res.body;
-  };
+    const res = await request(app.getHttpServer())
+      .get('/events')
+      .query(query)
+      .expect(200)
+    return res.body
+  }
 
-  const idsOf = (items: FeedItem[]): string[] => items.map((i) => String(i.id));
+  const idsOf = (items: FeedItem[]): string[] => items.map((i) => String(i.id))
   const isStrictlyDescendingByCreatedAt = (items: FeedItem[]): boolean =>
     items.every(
       (row, i) =>
         i === 0 ||
-        new Date(items[i - 1].createdAt).getTime() > new Date(row.createdAt).getTime(),
-    );
+        new Date(items[i - 1].createdAt).getTime() >
+          new Date(row.createdAt).getTime(),
+    )
 
   it('returns a correct, newest-first first page filtered to one user', async () => {
-    const page = await getFeed({ userId: FEED_USER, limit: PAGE });
+    const page = await getFeed({ userId: FEED_USER, limit: PAGE })
 
-    expect(page.items).toHaveLength(PAGE);
+    expect(page.items).toHaveLength(PAGE)
     // every row belongs to the requested user — no noise leaks in
-    expect(page.items.every((r) => Number(r.userId) === FEED_USER)).toBe(true);
+    expect(page.items.every((r) => Number(r.userId) === FEED_USER)).toBe(true)
     // newest first, strictly ordered
-    expect(isStrictlyDescendingByCreatedAt(page.items)).toBe(true);
+    expect(isStrictlyDescendingByCreatedAt(page.items)).toBe(true)
     // the very first row is genuinely the freshest event for this user
     const [{ max }] = await dataSource.query(
       'SELECT max(created_at) AS max FROM events WHERE user_id = $1',
       [FEED_USER],
-    );
-    expect(new Date(page.items[0].createdAt).getTime()).toBe(new Date(max).getTime());
+    )
+    expect(new Date(page.items[0].createdAt).getTime()).toBe(
+      new Date(max).getTime(),
+    )
     // there is more to fetch, so we get a cursor to continue
-    expect(typeof page.nextCursor).toBe('string');
-    expect((page.nextCursor as string).length).toBeGreaterThan(0);
-  });
+    expect(typeof page.nextCursor).toBe('string')
+    expect((page.nextCursor as string).length).toBeGreaterThan(0)
+  })
 
   it('advances by cursor to the next page with no overlap and no gap', async () => {
-    const p1 = await getFeed({ userId: FEED_USER, limit: PAGE });
-    const p2 = await getFeed({ userId: FEED_USER, limit: PAGE, cursor: p1.nextCursor as string });
+    const p1 = await getFeed({ userId: FEED_USER, limit: PAGE })
+    const p2 = await getFeed({
+      userId: FEED_USER,
+      limit: PAGE,
+      cursor: p1.nextCursor as string,
+    })
 
-    expect(p2.items).toHaveLength(PAGE);
+    console.log({ p1, p2 })
+
+    expect(p2.items).toHaveLength(PAGE)
     // disjoint: page 2 must not repeat any row from page 1
-    const p1ids = new Set(idsOf(p1.items));
-    expect(idsOf(p2.items).some((id) => p1ids.has(id))).toBe(false);
+    const p1ids = new Set(idsOf(p1.items))
+    expect(idsOf(p2.items).some((id) => p1ids.has(id))).toBe(false)
     // contiguous: page 2 starts strictly OLDER than page 1 ended (no gap, no jump back)
-    const p1Last = new Date(p1.items[p1.items.length - 1].createdAt).getTime();
-    const p2First = new Date(p2.items[0].createdAt).getTime();
-    expect(p2First).toBeLessThan(p1Last);
+    const p1Last = new Date(p1.items[p1.items.length - 1].createdAt).getTime()
+    const p2First = new Date(p2.items[0].createdAt).getTime()
+    expect(p2First).toBeLessThan(p1Last)
     // the two pages together are one clean descending run
-    expect(isStrictlyDescendingByCreatedAt([...p1.items, ...p2.items])).toBe(true);
-  });
+    expect(isStrictlyDescendingByCreatedAt([...p1.items, ...p2.items])).toBe(
+      true,
+    )
+  })
 
   it('keyset paging is STABLE when a newer event is inserted between pages (OFFSET would duplicate)', async () => {
-    const p1 = await getFeed({ userId: FEED_USER, limit: PAGE });
-    const p1ids = new Set(idsOf(p1.items));
+    const p1 = await getFeed({ userId: FEED_USER, limit: PAGE })
+    const p1ids = new Set(idsOf(p1.items))
 
     // A brand-new NEWEST event lands for this user AFTER page 1 was fetched but
     // BEFORE page 2. Under OFFSET 50/LIMIT 50 this shoves every row down one, so
@@ -186,20 +205,24 @@ describe('Kata 07 — Query performance (e2e)', () => {
        VALUES ($1, timestamptz '2020-01-01 00:00:00+00' + '3000 seconds'::interval, 'target-new')
        RETURNING id`,
       [FEED_USER],
-    );
+    )
 
-    const p2 = await getFeed({ userId: FEED_USER, limit: PAGE, cursor: p1.nextCursor as string });
+    const p2 = await getFeed({
+      userId: FEED_USER,
+      limit: PAGE,
+      cursor: p1.nextCursor as string,
+    })
 
     // the newly inserted head is newer than the cursor -> it belongs BEFORE the
     // cursor, so it must NOT appear on page 2
-    expect(idsOf(p2.items)).not.toContain(String(newHeadId));
+    expect(idsOf(p2.items)).not.toContain(String(newHeadId))
     // and — the whole point — no page-1 row is duplicated onto page 2
-    expect(idsOf(p2.items).some((id) => p1ids.has(id))).toBe(false);
+    expect(idsOf(p2.items).some((id) => p1ids.has(id))).toBe(false)
     // page 2 is still the correct next slice
-    expect(p2.items).toHaveLength(PAGE);
-    const p1Last = new Date(p1.items[p1.items.length - 1].createdAt).getTime();
-    expect(new Date(p2.items[0].createdAt).getTime()).toBeLessThan(p1Last);
-  });
+    expect(p2.items).toHaveLength(PAGE)
+    const p1Last = new Date(p1.items[p1.items.length - 1].createdAt).getTime()
+    expect(new Date(p2.items[0].createdAt).getTime()).toBeLessThan(p1Last)
+  })
 
   it('serves the feed query from an INDEX — no Seq Scan, no Sort (EXPLAIN)', async () => {
     // Grade the physical plan of the canonical feed query directly. With the
@@ -214,24 +237,26 @@ describe('Kata 07 — Query performance (e2e)', () => {
        ORDER BY created_at DESC, id DESC
        LIMIT $2`,
       [FEED_USER, PAGE],
-    );
+    )
 
     // pg returns [{ 'QUERY PLAN': [ { Plan: {...} } ] }]
-    const rootPlan = explained[0]['QUERY PLAN'][0].Plan;
-    const nodeTypes: string[] = [];
+    const rootPlan = explained[0]['QUERY PLAN'][0].Plan
+    const nodeTypes: string[] = []
     const walk = (node: any) => {
-      if (!node) return;
-      nodeTypes.push(node['Node Type']);
-      (node.Plans ?? []).forEach(walk);
-    };
-    walk(rootPlan);
+      if (!node) return
+      nodeTypes.push(node['Node Type'])
+      ;(node.Plans ?? []).forEach(walk)
+    }
+    walk(rootPlan)
 
-    const hasIndexScan = nodeTypes.some((t) => t === 'Index Scan' || t === 'Index Only Scan');
-    const hasSeqScan = nodeTypes.includes('Seq Scan');
-    const hasSort = nodeTypes.includes('Sort');
+    const hasIndexScan = nodeTypes.some(
+      (t) => t === 'Index Scan' || t === 'Index Only Scan',
+    )
+    const hasSeqScan = nodeTypes.includes('Seq Scan')
+    const hasSort = nodeTypes.includes('Sort')
 
-    expect(hasSeqScan).toBe(false); // an unindexed filter scans the whole table
-    expect(hasSort).toBe(false); // a non-covering index still forces a Sort
-    expect(hasIndexScan).toBe(true); // ordering comes from the index itself
-  });
-});
+    expect(hasSeqScan).toBe(false) // an unindexed filter scans the whole table
+    expect(hasSort).toBe(false) // a non-covering index still forces a Sort
+    expect(hasIndexScan).toBe(true) // ordering comes from the index itself
+  })
+})
