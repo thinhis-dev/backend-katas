@@ -8,3 +8,7 @@ export type CreateObserveJobBody = {
 export type ObserverJob = CreateObserveJobBody & {
   traceId: string
 }
+
+export type ObserverJobResult = {
+  traceId: string
+}

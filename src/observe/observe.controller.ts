@@ -3,72 +3,83 @@ import {
   Body,
   Controller,
   Get,
-  Headers,
   HttpCode,
   Inject,
+  Injectable,
   NestMiddleware,
   Param,
   Post,
-  Res,
+  UseInterceptors,
 } from '@nestjs/common'
 import { JobState, Queue } from 'bullmq'
-import { REDIS } from '../redis/redis.module'
-import Redis from 'ioredis'
-import { CreateObserveJobBody, OBSERVE_QUEUE } from './observe.constant'
+import { randomUUID } from 'node:crypto'
 import type { NextFunction, Request, Response } from 'express'
+import {
+  CreateObserveJobBody,
+  OBSERVE_QUEUE,
+  ObserverJob,
+  ObserverJobResult,
+} from './observe.constant'
+import { currentTraceId, traceStorage } from './trace-context'
+import { LatencyInterceptor } from './latency.interceptor'
+import { LatencyMetricsService } from './latency-metrics.service'
 
 type GetJobResult = {
-  state: JobState | unknown
-  runs: number
+  state: JobState | 'unknown'
+  traceId: string | null
 }
 
+@Injectable()
 export class SetTraceIdHeaderMiddleWare implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction) {
-    const traceIdFromHeader = req.headers['x-request-id'] as string
-    const traceId =
-      traceIdFromHeader ??
-      `trace-${Math.random().toString(36).substring(2, 15)}`
+    // The middleware is the ONLY place that creates an id. Everything
+    // downstream reads it from the store.
+    const inbound = req.header('x-request-id')
+    const traceId = inbound && inbound.length > 0 ? inbound : randomUUID()
 
     res.setHeader('X-Request-Id', traceId)
 
-    next()
+    // next() runs inside the store, so the guards, interceptors, and handler
+    // of this request all see this traceId.
+    traceStorage.run({ traceId }, next)
   }
 }
 
 @Controller('observe')
+@UseInterceptors(LatencyInterceptor)
 export class ObserveController {
   constructor(
-    @Inject(OBSERVE_QUEUE) private readonly queue: Queue,
-
-    @Inject(REDIS)
-    private readonly redis: Redis,
+    @Inject(OBSERVE_QUEUE)
+    private readonly queue: Queue<ObserverJob, ObserverJobResult>,
+    private readonly metrics: LatencyMetricsService,
   ) {}
 
   @Get('/ping')
-  async ping(@Headers('X-Request-Id') traceIdFromHeader: string) {
-    const traceId =
-      traceIdFromHeader ??
-      `trace-${Math.random().toString(36).substring(2, 15)}`
-
-    return { traceId }
+  ping() {
+    return { traceId: currentTraceId() }
   }
 
   @Get('/metrics')
-  async getMetrics() {}
+  getMetrics() {
+    return this.metrics.snapshot()
+  }
 
   @Post('/jobs')
   @HttpCode(202)
   async createJob(
     @Body() body: CreateObserveJobBody,
-    @Headers('X-Request-Id') traceIdFromHeader: string,
-  ): Promise<{ jobId: string; traceId: string }> {
-    const traceId =
-      traceIdFromHeader ??
-      `trace-${Math.random().toString(36).substring(2, 15)}`
+  ): Promise<{ jobId: string }> {
+    const traceId = currentTraceId()
+    if (!traceId) {
+      // Only happens if the middleware is not applied to this route.
+      throw new Error('No trace context: is SetTraceIdHeaderMiddleWare applied?')
+    }
 
+    // The worker has no request context. The id crosses the queue hop only
+    // because it rides inside the job payload.
     const job = await this.queue.add(
       'job',
-      { ...body, traceId },
+      { workMs: body?.workMs, traceId },
       {
         attempts: 3,
         backoff: {
@@ -82,7 +93,7 @@ export class ObserveController {
       throw new BadRequestException('Cannot create job')
     }
 
-    return { jobId: job.id, traceId }
+    return { jobId: job.id }
   }
 
   @Get('/jobs/:jobId')
@@ -90,19 +101,16 @@ export class ObserveController {
     const job = await this.queue.getJob(jobId)
 
     if (!job) {
-      return {
-        state: 'unknown',
-        runs: 0,
-      }
+      return { state: 'unknown', traceId: null }
     }
 
     const state = await job.getState()
-    const runsRaw = await this.redis.get(`jobs:runs:${job.id}`)
-    const runs = Number(runsRaw) ?? 0
 
+    // BullMQ stores the processor's return value on the job in Redis.
+    // It is empty until the worker finishes.
     return {
       state,
-      runs,
+      traceId: job.returnvalue?.traceId ?? null,
     }
   }
 }
