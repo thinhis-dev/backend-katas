@@ -42,7 +42,7 @@ https://docs.nestjs.com/interceptors
 
 ## Acceptance criteria
 
-All four assertions in the spec must pass. Then the kata is green.
+All five tests in the spec must pass. Then the kata is green.
 
 1. A request gets a trace-id. An inbound `X-Request-Id` header is echoed. The
    response carries the id back in the `X-Request-Id` header.
@@ -50,7 +50,9 @@ All four assertions in the spec must pass. Then the kata is green.
    different ids. Context is per request, not one shared global.
 3. The trace-id crosses the queue hop. The id on the POST request equals the id
    the worker records while it runs the job.
-4. Each request records its latency. The metrics totals grow after traffic.
+4. A generated id also crosses the queue hop. When the POST request has no
+   header, the id on the response header equals the id that the worker records.
+5. Each request records its latency. The metrics totals grow after traffic.
 
 ---
 
@@ -62,6 +64,110 @@ The full contract lives in the spec header. Summary:
 - `POST /observe/jobs` with body `{ workMs? }` returns `202 { jobId }`.
 - `GET /observe/jobs/:jobId` returns `{ state, traceId }`.
 - `GET /observe/metrics` returns `{ count, sumMs }`.
+
+---
+
+## Implementation walkthrough
+
+This section is the step order. It names each file and the job of each part.
+You write the code. Run the spec after each step, and make sure that the
+named test turns green before you go on.
+
+### The one idea
+
+One request gets one id. Only the middleware makes that id. Every other part
+reads the id from the store and never makes its own. The worker has no store,
+so the id travels in the job data, and the worker opens a new store with it.
+
+The flow for `POST /observe/jobs` with no header:
+
+```
+HTTP request
+  -> middleware: id = header or new id "A"
+                 set response header X-Request-Id: A
+                 als.run({ traceId: A }, next)   // everything after this sees A
+  -> controller createJob: id = als.getStore().traceId   // A, not a new id
+                 queue.add('job', { workMs, traceId: A })
+  -> response 202 { jobId }, header X-Request-Id: A
+        ... Redis holds the job ...
+worker loop (no request, empty store)
+  -> processor(job): als.run({ traceId: job.data.traceId }, work)
+                 work reads als.getStore().traceId      // A again
+                 return { traceId: A }                  // BullMQ saves it as job.returnvalue
+GET /observe/jobs/:jobId
+  -> job = queue.getJob(jobId)
+  -> { state: job.getState(), traceId: job.returnvalue?.traceId ?? null }
+```
+
+### Step 1. Create one shared store
+
+Create `src/observe/trace-context.ts`. Export one `AsyncLocalStorage` instance
+typed as `{ traceId: string }`. Add a small helper that returns the current
+trace-id, or `undefined` when no store is open.
+
+This instance must be a module-level constant. The middleware, the controller,
+and the worker all import the same instance. The instance itself is shared, but
+each `run()` call gives its callback a separate store. That is why two requests
+at the same time do not mix their ids.
+
+Spring parallel: the instance is `MDC`, `run()` is `MDC.put` plus the cleanup
+in `finally`, and `getStore()` is `MDC.get`.
+
+### Step 2. Open the store in the middleware
+
+In `SetTraceIdHeaderMiddleWare.use()`, keep the code that picks the id and sets
+the response header. Change the last line: call `next()` inside `run()` on your
+store, not by itself. Everything that Nest runs after `next()` for this request
+now sees the store.
+
+Tests 1 and 2 turn green when `ping()` returns the id from the helper.
+
+### Step 3. Read the id in createJob
+
+In `ObserveController.createJob`, delete the `@Headers('X-Request-Id')`
+parameter and the `Math.random()` line. Get the id from the helper of step 1.
+Put that id in the job data. Return only `{ jobId }`, because the contract has
+no `traceId` in the POST body.
+
+### Step 4. Reopen the store in the worker
+
+In `observe.module.ts`, change the worker processor. Wrap the work in `run()`
+on the same store, with `job.data.traceId` as the store value. Inside the
+callback, do the `workMs` sleep, then read the id back from the helper and
+return it in an object.
+
+BullMQ saves the return value of the processor on the job in Redis as
+`job.returnvalue`. You do not need a separate Redis key.
+
+Why not return `job.data.traceId` directly? That passes the test but skips the
+lesson. The read from the store proves that code inside the worker, for
+example a logger, sees the id of the request that created the job.
+
+### Step 5. Return the id from GET /observe/jobs/:jobId
+
+In `ObserveController.getJob`, replace `runs` with `traceId`. Read it from
+`job.returnvalue`. Return `null` when the job has no return value yet, and for
+the not-found case. Delete the `jobs:runs` Redis read, which this kata does not
+use.
+
+Tests 3 and 4 turn green after this step.
+
+### Step 6. Count latency in an interceptor
+
+Create `src/observe/latency.interceptor.ts`. In `intercept()`, record the start
+time. Call `next.handle()` and use the RxJS `finalize` operator to add the
+elapsed milliseconds to a running `count` and `sumMs`. Keep the two totals in
+an `@Injectable()` service, so the interceptor and the controller share one
+instance.
+
+Register the interceptor on the controller with `@UseInterceptors`, or for the
+whole app with `APP_INTERCEPTOR`. `getMetrics()` returns the two totals from
+the service.
+
+Test 5 turns green after this step.
+
+Spring parallel: the interceptor is a Micrometer `Timer` around the handler,
+the same as `@Timed`.
 
 ---
 

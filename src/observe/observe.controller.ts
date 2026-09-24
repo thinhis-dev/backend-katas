@@ -3,20 +3,36 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   Inject,
-  NotFoundException,
+  NestMiddleware,
   Param,
   Post,
+  Res,
 } from '@nestjs/common'
 import { JobState, Queue } from 'bullmq'
 import { REDIS } from '../redis/redis.module'
 import Redis from 'ioredis'
 import { CreateObserveJobBody, OBSERVE_QUEUE } from './observe.constant'
+import type { NextFunction, Request, Response } from 'express'
 
 type GetJobResult = {
   state: JobState | unknown
   runs: number
+}
+
+export class SetTraceIdHeaderMiddleWare implements NestMiddleware {
+  use(req: Request, res: Response, next: NextFunction) {
+    const traceIdFromHeader = req.headers['x-request-id'] as string
+    const traceId =
+      traceIdFromHeader ??
+      `trace-${Math.random().toString(36).substring(2, 15)}`
+
+    res.setHeader('X-Request-Id', traceId)
+
+    next()
+  }
 }
 
 @Controller('observe')
@@ -29,8 +45,12 @@ export class ObserveController {
   ) {}
 
   @Get('/ping')
-  async ping() {
-    return { message: 'pong' }
+  async ping(@Headers('X-Request-Id') traceIdFromHeader: string) {
+    const traceId =
+      traceIdFromHeader ??
+      `trace-${Math.random().toString(36).substring(2, 15)}`
+
+    return { traceId }
   }
 
   @Get('/metrics')
@@ -40,20 +60,29 @@ export class ObserveController {
   @HttpCode(202)
   async createJob(
     @Body() body: CreateObserveJobBody,
-  ): Promise<{ jobId: string }> {
-    const job = await this.queue.add('job', body, {
-      attempts: 3,
-      backoff: {
-        type: 'fixed',
-        delay: 500,
+    @Headers('X-Request-Id') traceIdFromHeader: string,
+  ): Promise<{ jobId: string; traceId: string }> {
+    const traceId =
+      traceIdFromHeader ??
+      `trace-${Math.random().toString(36).substring(2, 15)}`
+
+    const job = await this.queue.add(
+      'job',
+      { ...body, traceId },
+      {
+        attempts: 3,
+        backoff: {
+          type: 'fixed',
+          delay: 500,
+        },
       },
-    })
+    )
 
     if (!job || !job.id) {
       throw new BadRequestException('Cannot create job')
     }
 
-    return { jobId: job.id }
+    return { jobId: job.id, traceId }
   }
 
   @Get('/jobs/:jobId')

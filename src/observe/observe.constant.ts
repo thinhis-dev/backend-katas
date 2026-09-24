@@ -4,3 +4,7 @@ export const OBSERVE_WORKER = 'OBSERVE_WORKER'
 export type CreateObserveJobBody = {
   workMs?: number
 }
+
+export type ObserverJob = CreateObserveJobBody & {
+  traceId: string
+}

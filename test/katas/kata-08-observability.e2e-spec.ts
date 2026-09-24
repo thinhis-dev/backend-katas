@@ -143,6 +143,24 @@ describe('Kata 08 — Observability (e2e)', () => {
     expect(final.traceId).toBe('trace-xyz-789')
   }, 20000)
 
+  it('CARRIES a GENERATED trace-id into the worker (one id per request, not two)', async () => {
+    // No inbound X-Request-Id: the server generates ONE id for this request.
+    // The id on the response header and the id the worker saw must be that same
+    // id — a second id minted inside the handler breaks the chain.
+    const enqueued = await request(app.getHttpServer())
+      .post('/observe/jobs')
+      .send({ workMs: 0 })
+      .expect(202)
+
+    const headerId = enqueued.headers['x-request-id']
+    expect(typeof headerId).toBe('string')
+    expect(headerId.length).toBeGreaterThan(0)
+
+    const final = await waitForJob(enqueued.body.jobId, ['completed', 'failed'])
+    expect(final.state).toBe('completed')
+    expect(final.traceId).toBe(headerId)
+  }, 20000)
+
   it('RECORDS a latency metric for each request (count and duration only grow)', async () => {
     const before = await request(app.getHttpServer())
       .get('/observe/metrics')
